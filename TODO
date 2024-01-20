@@ -1,0 +1,23 @@
+Erudify-cli:
+
+ * How to deal with logins? OAuth from the command line?
+ * Phenetic practice:
+   - UI elements.
+   - Picking the right sentence.
+   - Updating the user model.
+   - How is data stored?
+
+Training algorithm:
+  Word model:
+    - Last success.
+    - Current duration.
+    - Answer quality
+      - Perfect: +10% if within duration. +500% if outside duration.
+      - Hinted: 0%.
+      - Wrong: reset duration to initial value.
+    - Show at: Date.
+  Sentence:
+    - User models.
+    - Show at: (min of all word models).
+
+
