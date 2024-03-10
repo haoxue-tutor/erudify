@@ -809,9 +809,9 @@ dependencies = [
 
 [[package]]
 name = "haoxue-dict"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45e466bf15fc2401015cdc9ec54ea2748e87e90502533f17aec873b30ee8a69b"
+checksum = "bdc5f6a2fe4e0a36c64dfc868736eedfe8640d11c1abcf4fe60382f713a924e6"
 dependencies = [
  "cedict",
  "csv",

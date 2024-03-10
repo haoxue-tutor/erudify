@@ -10,7 +10,7 @@ use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Exercise {
     segments: Vec<Segment>,
     english: String,
@@ -29,13 +29,13 @@ impl Exercise {
         let mut pinyin = None;
         let mut english = None;
         for _ in 0..3 {
-            let (line, rest) = input.split_once('\n')?;
+            let (line, rest) = input.split_once('\n').unwrap_or((input, ""));
             input = rest;
             let (key, value) = line.split_once(':')?;
             match key {
-                "Chinese" => chinese = Some(value.to_string()),
-                "Pinyin" => pinyin = Some(value.to_string()),
-                "English" => english = Some(value.to_string()),
+                "Chinese" => chinese = Some(value.trim().to_string()),
+                "Pinyin" => pinyin = Some(value.trim().to_string()),
+                "English" => english = Some(value.trim().to_string()),
                 _ => return None,
             }
         }
@@ -61,35 +61,53 @@ struct Segment {
 impl Segment {
     // 今天有两个会议。
     // Jīntiān yǒu liǎng gè huìyì.
-    // 今天 有 两 个 会议。
+    // 今天     有  两    个  会议。
     fn join(chinese: &str, pinyin: &str) -> Vec<Self> {
         // split chinese into chars.
         // split pinyin into words.
         // for each word, consume chinese letters
         let mut c_chars = chinese.chars();
-        let tmp = pinyin.to_lowercase();
-        let p_words = tmp.split_ascii_whitespace();
+        let mut chin = chinese;
+        let tmp = pinyin.to_lowercase().replace("'", "");
+        let p_words = tmp.split(|c| char::is_ascii_whitespace(&c));
         p_words
+            .filter(|word| !word.is_empty())
             .map(|mut word| {
                 let mut out_chinese = String::new();
                 let mut out_pinyin = String::new();
                 'outer: while !word.is_empty() {
                     dbg!(&word);
-                    let token = c_chars.next().unwrap().to_string();
-                    dbg!(&token);
-                    for entry in haoxue_dict::DICTIONARY.lookup_entries(&token) {
-                        let pretty = prettify_pinyin::prettify(entry.pinyin());
+                    dbg!(&chin);
+                    // let token = c_chars.next().unwrap().to_string();
+                    // dbg!(&token);
+                    let results = haoxue_dict::DICTIONARY
+                        .lookup_entries(chin)
+                        .collect::<Vec<_>>();
+                    for entry in results.into_iter().rev() {
+                        let pretty = prettify_pinyin::prettify(entry.pinyin()).replace(" ", "");
                         dbg!(&pretty);
                         dbg!(&word.strip_prefix(&pretty));
                         if let Some(new_word) = word.strip_prefix(&pretty) {
-                            out_chinese += &token;
+                            chin = chin.strip_prefix(entry.simplified()).unwrap();
+                            out_chinese += entry.simplified();
                             out_pinyin += &pretty;
                             word = new_word;
                             continue 'outer;
                         }
                     }
-                    out_chinese += &token;
-                    word = str_tail(word);
+                    if word.chars().all(|c| {
+                        char::is_whitespace(c)
+                            || char::is_ascii_punctuation(&c)
+                            || char::is_ascii_digit(&c)
+                    }) {
+                        out_chinese += chin.chars().next().unwrap().to_string().as_str();
+                        chin = str_tail(chin);
+                        word = str_tail(word);
+                        continue 'outer;
+                    }
+                    panic!("Failed to find match");
+                    // out_chinese += &token;
+                    // word = str_tail(word);
                 }
                 Segment {
                     chinese: out_chinese,
@@ -124,7 +142,7 @@ struct Response {
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Command>,
+    command: Command,
 }
 
 #[derive(Subcommand, Clone)]
@@ -135,6 +153,27 @@ enum Command {
 
 fn main() {
     let cli = Cli::parse();
+
+    match cli.command {
+        Command::Convert { sentence_file } => {
+            let sentences = std::fs::read_to_string(sentence_file).unwrap();
+            let mut exercises = Vec::new();
+            let mut rest = sentences.as_str();
+            while !rest.trim().is_empty() {
+                if let Some((exercise, new_rest)) = Exercise::parse(rest) {
+                    dbg!(&exercise);
+                    exercises.push(exercise);
+                    rest = new_rest;
+                } else {
+                    panic!("Failed to parse at:\n{rest}");
+                }
+            }
+            dbg!(exercises.len());
+        }
+        Command::Train => {
+            todo!();
+        }
+    }
 
     // Load word models
     // Load sentences
@@ -164,5 +203,13 @@ mod tests {
     #[test]
     fn basic_segment_2() {
         dbg!(Segment::join("我叫David。你好。", "Wǒ jiào David. Nǐ hǎo."));
+    }
+
+    #[test]
+    fn basic_segment_3() {
+        dbg!(Segment::join(
+            "他答应帮忙，但是忘记了。",
+            "Tā dāyìng bāngmáng, dànshì wàngjì le."
+        ));
     }
 }
