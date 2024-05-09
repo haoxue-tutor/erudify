@@ -68,11 +68,11 @@ impl Segment {
     //
     // Chinese: 我叫David。你好。
     // Pinyin: Wǒ jiào David. Nǐ hǎo.
-    fn join(chinese: &str, pinyin: &str) -> Vec<Self> {
+    fn join(orig_chinese: &str, orig_pinyin: &str) -> Vec<Self> {
         let mut segments: Vec<Self> = vec![];
-        let pinyin = pinyin.to_lowercase().replace("'", "");
+        let pinyin = orig_pinyin.to_lowercase().replace("'", "");
         let mut pinyin = pinyin.as_str();
-        let mut chinese = chinese;
+        let mut chinese = orig_chinese;
         'top: while !chinese.is_empty() {
             pinyin = pinyin.trim_start();
             let results = haoxue_dict::DICTIONARY
@@ -108,7 +108,7 @@ impl Segment {
                         continue 'top;
                     }
                 }
-                panic!("Failed to align match");
+                panic!("Failed to align match {orig_chinese} with {orig_pinyin} at {pinyin}");
             }
         }
         segments
