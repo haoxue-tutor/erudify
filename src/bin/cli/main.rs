@@ -166,18 +166,15 @@ fn main() {
     match cli.command {
         Command::Convert { sentence_file } => {
             let sentences = std::fs::read_to_string(sentence_file).unwrap();
-            let mut exercises = Vec::new();
             let mut rest = sentences.as_str();
             while !rest.trim().is_empty() {
                 if let Some((exercise, new_rest)) = Exercise::parse(rest) {
-                    dbg!(&exercise);
-                    exercises.push(exercise);
+                    println!("{}", serde_yaml::to_string(&[exercise]).unwrap());
                     rest = new_rest;
                 } else {
                     panic!("Failed to parse at:\n{rest}");
                 }
             }
-            dbg!(exercises.len());
         }
         Command::Train => {
             todo!();
