@@ -10,6 +10,18 @@ use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
+use std::{error::Error, io};
+
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    prelude::*,
+    widgets::{Block, List, ListItem, Paragraph},
+};
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Exercise {
     segments: Vec<Segment>,
@@ -160,7 +172,7 @@ enum Command {
     Train,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -177,9 +189,15 @@ fn main() {
             }
         }
         Command::Train => {
-            todo!();
+            // Chinese: 我是学生。
+            // Pinyin:  wǒ shì xuéshēng.
+            // English: I am a student.
+            // Answer:  wǒ
+
+            train()?;
         }
     }
+    Ok(())
 
     // Load word models
     // Load sentences
@@ -192,6 +210,99 @@ fn main() {
     // Repeat
 
     // Ok(())
+}
+
+struct App {}
+
+impl App {
+    fn new() -> Self {
+        App {}
+    }
+}
+
+fn train() -> Result<(), Box<dyn std::error::Error>> {
+    // setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    // create app and run it
+    let app = App::new();
+    let res = run_app(&mut terminal, app);
+
+    // restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    if let Err(err) = res {
+        println!("{err:?}");
+    }
+
+    Ok(())
+}
+
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<()> {
+    loop {
+        terminal.draw(|f| ui(f, &app))?;
+
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Char('q') => {
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn ui(f: &mut Frame, app: &App) {
+    let vertical = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(3),
+        Constraint::Min(1),
+    ]);
+    let [help_area, input_area, messages_area] = vertical.areas(f.size());
+
+    let (msg, style) = (
+        vec![
+            "Press ".into(),
+            "q".bold(),
+            " to exit, ".into(),
+            "e".bold(),
+            " to start editing.".bold(),
+        ],
+        Style::default().add_modifier(Modifier::RAPID_BLINK),
+    );
+    let text = Text::from(Line::from(msg)).patch_style(style);
+    let help_message = Paragraph::new(text);
+    f.render_widget(help_message, help_area);
+
+    let input = Paragraph::new("Input")
+        .style(Style::default().fg(Color::Yellow))
+        .block(Block::bordered().title("Input"));
+    f.render_widget(input, input_area);
+    // Make the cursor visible and ask ratatui to put it at the specified coordinates after
+    // rendering
+    #[allow(clippy::cast_possible_truncation)]
+    f.set_cursor(
+        // Draw the cursor at the current position in the input field.
+        // This position is can be controlled via the left and right arrow key
+        input_area.x + 0 + 1,
+        // Move one line down, from the border to the input line
+        input_area.y + 1,
+    );
+
+    let messages: Vec<ListItem> = vec![];
+    let messages = List::new(messages).block(Block::bordered().title("Messages"));
+    f.render_widget(messages, messages_area);
 }
 
 #[cfg(test)]
