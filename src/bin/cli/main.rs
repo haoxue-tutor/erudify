@@ -13,28 +13,27 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, io};
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
+    layout::Offset,
     prelude::*,
     widgets::{Block, List, ListItem, Paragraph},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+use std::fs::File;
+use std::io::Read;
+use tui_input::{backend::crossterm::EventHandler, Input};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Exercise {
     segments: Vec<Segment>,
     english: String,
 }
 
 impl Exercise {
-    fn empty() -> Self {
-        Exercise {
-            segments: Vec::new(),
-            english: String::new(),
-        }
-    }
     fn parse(input: &str) -> Option<(Self, &str)> {
         let mut input = input.trim();
         let mut chinese = None;
@@ -171,7 +170,7 @@ struct Cli {
 #[derive(Subcommand, Clone)]
 enum Command {
     Convert { sentence_file: PathBuf },
-    Train,
+    Train { exercise_file: PathBuf },
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -190,39 +189,50 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-        Command::Train => {
+        Command::Train { exercise_file } => {
             // Chinese: 我是学生。
             // Pinyin:  wǒ shì xuéshēng.
             // English: I am a student.
             // Answer:  wǒ
 
-            train()?;
+            let mut file = File::open(exercise_file)?;
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)?;
+
+            let exercises: Vec<Exercise> = serde_yaml::from_str(&contents)?;
+
+            train(exercises)?;
         }
     }
     Ok(())
-
-    // Load word models
-    // Load sentences
-    // Load word list
-
-    // Find expired sentences closest to now().
-    // Otherwise, find best sentence with next word from list.
-    // Prompt sentence
-    // Update models
-    // Repeat
-
-    // Ok(())
 }
 
-struct App {}
+struct App {
+    exercises: Vec<Exercise>,
+    exercise: Exercise,
+    index: usize,
+    input: Input,
+    show_english: bool,
+    show_hint: bool,
+    history: Vec<Exercise>,
+}
 
 impl App {
-    fn new() -> Self {
-        App {}
+    fn new(mut exercises: Vec<Exercise>) -> Self {
+        let exercise = exercises.pop().unwrap();
+        App {
+            exercises,
+            exercise,
+            index: 0,
+            input: Input::new("".into()),
+            show_english: false,
+            show_hint: false,
+            history: vec![],
+        }
     }
 }
 
-fn train() -> Result<(), Box<dyn std::error::Error>> {
+fn train(mut exercises: Vec<Exercise>) -> Result<(), Box<dyn std::error::Error>> {
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -231,7 +241,8 @@ fn train() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // create app and run it
-    let app = App::new();
+    exercises.reverse();
+    let app = App::new(exercises);
     let res = run_app(&mut terminal, app);
 
     // restore terminal
@@ -254,13 +265,35 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
     loop {
         terminal.draw(|f| ui(f, &app))?;
 
-        if let Event::Key(key) = event::read()? {
+        let evt = event::read()?;
+        if let Event::Key(key) = &evt {
             match key.code {
-                KeyCode::Char('q') => {
-                    return Ok(());
-                }
+                KeyCode::Esc => return Ok(()),
                 _ => {}
             }
+        }
+        app.input.handle_event(&evt);
+
+        let cursor = app.input.cursor();
+        let pinyin = prettify_pinyin::prettify(app.input.value());
+        let pinyin_len = pinyin.chars().count();
+        app.input = Input::new(pinyin)
+            .with_cursor(cursor - (app.input.value().chars().count() - pinyin_len));
+
+        while app.index < app.exercise.segments.len() {
+            let target = &app.exercise.segments[app.index].pinyin;
+            if target == &app.input.value().trim().to_lowercase() {
+                app.index += 1;
+                app.input = Input::new("".into());
+            } else {
+                break;
+            }
+        }
+        if app.index >= app.exercise.segments.len() {
+            app.history.push(app.exercise.clone());
+            let exercise = app.exercises.pop().unwrap();
+            app.exercise = exercise;
+            app.index = 0;
         }
     }
 }
@@ -268,42 +301,79 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 fn ui(f: &mut Frame, app: &App) {
     let vertical = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(3),
+        Constraint::Length(1),
         Constraint::Min(1),
     ]);
-    let [help_area, input_area, messages_area] = vertical.areas(f.size());
+    let [help_area, pinyin_area, messages_area] = vertical.areas(f.size());
 
-    let (msg, style) = (
-        vec![
-            "Press ".into(),
-            "q".bold(),
-            " to exit, ".into(),
-            "e".bold(),
-            " to start editing.".bold(),
-        ],
-        Style::default().add_modifier(Modifier::RAPID_BLINK),
-    );
-    let text = Text::from(Line::from(msg)).patch_style(style);
+    let mut msg = vec![];
+    msg.push("Chinese: ".into());
+    for (nth, segment) in app.exercise.segments.iter().enumerate() {
+        let span: Span = segment.chinese.clone().into();
+        if nth == app.index {
+            msg.push(span.bold().fg(Color::Yellow));
+        } else {
+            msg.push(span);
+        }
+    }
+    let text = Text::from(Line::from(msg));
     let help_message = Paragraph::new(text);
     f.render_widget(help_message, help_area);
 
-    let input = Paragraph::new("Input")
-        .style(Style::default().fg(Color::Yellow))
-        .block(Block::bordered().title("Input"));
-    f.render_widget(input, input_area);
+    let mut pinyin_msgs: Vec<Span> = vec![];
+    pinyin_msgs.push("Pinyin:  ".into());
+    for segment in app.exercise.segments.iter().take(app.index) {
+        let span: Span = segment.pinyin.clone().replace(" ", "").into();
+        pinyin_msgs.push(span.dim());
+        pinyin_msgs.push(" ".into());
+    }
+    let pinyin_line = Line::from(pinyin_msgs);
+    let pinyin_line_len = pinyin_line.width();
+    f.render_widget(Text::from(pinyin_line), pinyin_area);
+
+    let pinyin_area = pinyin_area.offset(Offset {
+        x: pinyin_line_len as i32,
+        y: 0,
+    });
+    let input = Paragraph::new(app.input.value());
+    f.render_widget(input, pinyin_area);
     // Make the cursor visible and ask ratatui to put it at the specified coordinates after
     // rendering
     #[allow(clippy::cast_possible_truncation)]
     f.set_cursor(
         // Draw the cursor at the current position in the input field.
         // This position is can be controlled via the left and right arrow key
-        input_area.x + 0 + 1,
+        pinyin_area.x + app.input.visual_cursor() as u16,
         // Move one line down, from the border to the input line
-        input_area.y + 1,
+        pinyin_area.y,
     );
 
-    let messages: Vec<ListItem> = vec![];
-    let messages = List::new(messages).block(Block::bordered().title("Messages"));
+    let mut messages: Vec<ListItem> = vec![];
+    for exercise in app.history.iter().rev() {
+        messages.push(ListItem::new(Text::from(format!(
+            "Chinese: {}",
+            exercise
+                .segments
+                .iter()
+                .map(|s| s.chinese.as_str())
+                .collect::<String>()
+        ))));
+        messages.push(ListItem::new(Text::from(format!(
+            "Pinyin:  {}",
+            exercise
+                .segments
+                .iter()
+                .map(|s| s.pinyin.replace(" ", ""))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ))));
+        messages.push(ListItem::new(Text::from(format!(
+            "English: {}",
+            exercise.english
+        ))));
+        messages.push(ListItem::new(Text::from("")));
+    }
+    let messages = List::new(messages).block(Block::bordered().title("History"));
     f.render_widget(messages, messages_area);
 }
 
