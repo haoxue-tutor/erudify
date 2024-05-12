@@ -110,7 +110,9 @@ impl Segment {
                     let pretty = prettify_pinyin::prettify(entry.pinyin());
                     // dbg!(&pretty);
                     // dbg!(&pinyin);
-                    if let Some(new_pinyin) = pinyin.strip_prefix(&pretty.replace(" ", "")) {
+                    if let Some(new_pinyin) =
+                        pinyin.strip_prefix(&pretty.to_lowercase().replace(" ", ""))
+                    {
                         segments.push(Segment {
                             chinese: entry.simplified().to_string(),
                             pinyin: pretty,
