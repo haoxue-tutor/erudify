@@ -20,4 +20,15 @@ Training algorithm:
     - User models.
     - Show at: (min of all word models).
 
+Sentence file -> Split by word
 
+
+
+Notes:
+ - Start with something similar to HackChinese. Key differences: Words shown
+   in context, answers validated by computer.
+ - Extend with audio: Prompt with audio, user types in answer in Chinese.
+ - Extend with stories (pinyin): Linear progression through text/stories with
+   Chinese prompts and pinyin answers. Reveal pinyin gradually.
+ - Extend with stories (audio): Linear progression thorugh textstories with
+   Audio prompts and Chinese answers. Reveal story gradually.
