@@ -268,7 +268,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
         let evt = event::read()?;
         if let Event::Key(key) = &evt {
             match key.code {
-                KeyCode::Esc => return Ok(()),
+                KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                    return Ok(())
+                }
+                KeyCode::Esc => {
+                    app.show_hint = true;
+                }
                 _ => {}
             }
         }
@@ -285,6 +290,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
             if target == &app.input.value().trim().to_lowercase() {
                 app.index += 1;
                 app.input = Input::new("".into());
+                app.show_hint = false;
             } else {
                 break;
             }
@@ -302,9 +308,10 @@ fn ui(f: &mut Frame, app: &App) {
     let vertical = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
+        Constraint::Length(1),
         Constraint::Min(1),
     ]);
-    let [help_area, pinyin_area, messages_area] = vertical.areas(f.size());
+    let [help_area, pinyin_area, hint_area, messages_area] = vertical.areas(f.size());
 
     let mut msg = vec![];
     msg.push("Chinese: ".into());
@@ -347,6 +354,13 @@ fn ui(f: &mut Frame, app: &App) {
         // Move one line down, from the border to the input line
         pinyin_area.y,
     );
+
+    if app.show_hint {
+        let hint = app.exercise.segments[app.index].pinyin.clone();
+        let hint =
+            Paragraph::new(format!("Answer: {hint}")).style(Style::default().fg(Color::Yellow));
+        f.render_widget(hint, hint_area);
+    }
 
     let mut messages: Vec<ListItem> = vec![];
     for exercise in app.history.iter().rev() {
