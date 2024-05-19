@@ -83,7 +83,8 @@ impl Segment {
         let mut segments: Vec<Self> = vec![];
         let pinyin = orig_pinyin.to_lowercase().replace("'", "");
         let mut pinyin = pinyin.as_str();
-        let mut chinese = orig_chinese;
+        let orig_chinese = orig_chinese.replace(' ', "");
+        let mut chinese = orig_chinese.as_str();
         'top: while !chinese.is_empty() {
             pinyin = pinyin.trim_start();
             let results = haoxue_dict::DICTIONARY
