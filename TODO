@@ -32,3 +32,19 @@ Notes:
    Chinese prompts and pinyin answers. Reveal pinyin gradually.
  - Extend with stories (audio): Linear progression thorugh textstories with
    Audio prompts and Chinese answers. Reveal story gradually.
+
+Commands:
+  - Sort word list by frequency.
+  - Take word list. For each unique word, find best exercise. Keep track of which words has already been
+seen. Introducing no new words is best. Introducing words that are coming later is okay. Introducing
+words not the text is a last resort. Show list of words that are introduced too soon, and list of
+words that are introduced needlessly. Take list of basic words that should be assumed to be known.
+
+yídìng -> yīdìng
+ge -> gè
+làba lǎba
+búduàn -> bùduàn
+yīnshù -> yīnsù
+fājiǎo -> fàjiāo
+qíjī -> qíjì
+bàodǎo -> bàodào
