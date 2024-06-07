@@ -7,7 +7,7 @@ pub struct Exercise {
 }
 
 impl Exercise {
-    pub fn parse(input: &str) -> Option<(Self, &str)> {
+    pub fn parse(input: &str, strict_segmentation: bool, lax_pinyin: bool) -> Option<(Self, &str)> {
         let mut input = input.trim();
         let mut chinese = None;
         let mut pinyin = None;
@@ -28,7 +28,7 @@ impl Exercise {
         let english = english?;
         Some((
             Exercise {
-                segments: Segment::join(&chinese, &pinyin),
+                segments: Segment::join_with(&chinese, &pinyin, strict_segmentation, lax_pinyin),
                 english,
             },
             input,
@@ -71,6 +71,15 @@ impl Segment {
     // Chinese: 我叫David。你好。
     // Pinyin: Wǒ jiào David. Nǐ hǎo.
     fn join(orig_chinese: &str, orig_pinyin: &str) -> Vec<Self> {
+        Self::join_with(orig_chinese, orig_pinyin, true, false)
+    }
+
+    fn join_with(
+        orig_chinese: &str,
+        orig_pinyin: &str,
+        strict_segmentation: bool,
+        lax_pinyin: bool,
+    ) -> Vec<Self> {
         let mut segments: Vec<Self> = vec![];
         let pinyin = orig_pinyin.to_lowercase().replace("'", "");
         let mut pinyin = pinyin.as_str();
@@ -99,11 +108,22 @@ impl Segment {
             } else {
                 for entry in results.into_iter().rev() {
                     let pretty = prettify_pinyin::prettify(entry.pinyin());
+                    let pretty_compact = pretty.to_lowercase().replace(" ", "");
                     // dbg!(&pretty);
                     // dbg!(&pinyin);
-                    if let Some(new_pinyin) =
-                        pinyin.strip_prefix(&pretty.to_lowercase().replace(" ", ""))
-                    {
+                    let stripped = if lax_pinyin {
+                        strip_prefix_no_tones(pinyin, &pretty_compact)
+                    } else {
+                        pinyin.strip_prefix(pretty_compact.as_str())
+                    };
+                    if let Some(new_pinyin) = stripped {
+                        if strict_segmentation && new_pinyin.chars().next().unwrap().is_alphabetic()
+                        {
+                            panic!(
+                                "Segmentation failed at {} at {pinyin}",
+                                pretty.to_lowercase().replace(" ", "")
+                            );
+                        }
                         segments.push(Segment {
                             chinese: entry.simplified().to_string(),
                             pinyin: pretty,
@@ -118,6 +138,42 @@ impl Segment {
         }
         segments
     }
+}
+
+fn strip_prefix_no_tones<'a>(mut input: &'a str, mut prefix: &str) -> Option<&'a str> {
+    while !input.is_empty() && !prefix.is_empty() {
+        let (input_c, input_tail) = str_pop(input)?;
+        let (prefix_c, prefix_tail) = str_pop(prefix)?;
+        if strip_tone(prefix_c) != strip_tone(input_c) {
+            return None;
+        }
+        input = input_tail;
+        prefix = prefix_tail;
+    }
+    Some(input)
+}
+
+fn strip_tone(c: char) -> char {
+    let tones = [
+        ['ā', 'á', 'ǎ', 'à', 'a'],
+        ['ē', 'é', 'ě', 'è', 'e'],
+        ['ū', 'ú', 'ǔ', 'ù', 'u'],
+        ['ī', 'í', 'ǐ', 'ì', 'i'],
+        ['ō', 'ó', 'ǒ', 'ò', 'o'],
+        ['ǖ', 'ǘ', 'ǚ', 'ǜ', 'ü'],
+        ['Ā', 'Á', 'Ǎ', 'À', 'A'],
+        ['Ē', 'É', 'Ě', 'È', 'E'],
+        ['Ū', 'Ú', 'Ǔ', 'Ù', 'U'],
+        ['Ī', 'Í', 'Ǐ', 'Ì', 'I'],
+        ['Ō', 'Ó', 'Ǒ', 'Ò', 'O'],
+        ['Ǖ', 'Ǘ', 'Ǚ', 'Ǜ', 'U'],
+    ];
+    for tone_set in &tones {
+        if tone_set.contains(&c) {
+            return tone_set[4];
+        }
+    }
+    c
 }
 
 fn str_tail(input: &str) -> &str {

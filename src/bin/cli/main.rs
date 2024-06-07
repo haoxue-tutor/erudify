@@ -35,6 +35,10 @@ struct Cli {
 enum Command {
     Convert {
         sentence_file: PathBuf,
+        #[arg(long)]
+        lax_segmentation: bool,
+        #[arg(long)]
+        strict_pinyin: bool,
     },
     Train {
         exercise_file: PathBuf,
@@ -62,11 +66,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Convert { sentence_file } => {
+        Command::Convert {
+            sentence_file,
+            lax_segmentation,
+            strict_pinyin,
+        } => {
             let sentences = std::fs::read_to_string(sentence_file).unwrap();
             let mut rest = sentences.as_str();
             while !rest.trim().is_empty() {
-                if let Some((exercise, new_rest)) = Exercise::parse(rest) {
+                if let Some((exercise, new_rest)) =
+                    Exercise::parse(rest, !lax_segmentation, !strict_pinyin)
+                {
                     println!("{}", serde_yaml::to_string(&[exercise]).unwrap());
                     rest = new_rest;
                 } else {
@@ -160,7 +170,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     OutputFormat::CSV => {
                         if let Some(cost) = costs.first() {
-                            println!("{}\t{}", costs[0].0.english, costs[0].0.chinese());
+                            println!("{}\t{}", cost.0.english, cost.0.chinese());
                         }
                     }
                 }
@@ -218,7 +228,7 @@ impl Course {
     }
 
     fn exercise_cost(&self, exercise: &Exercise) -> ExerciseCost {
-        let mut seen_words = self
+        let seen_words = self
             .course_exercises
             .iter()
             .flat_map(|e| e.words())
