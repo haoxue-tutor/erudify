@@ -44,6 +44,14 @@ impl Exercise {
         ws.dedup();
         ws
     }
+
+    pub fn chinese(&self) -> String {
+        self.segments
+            .iter()
+            .map(|s| s.chinese.clone())
+            .collect::<Vec<_>>()
+            .join("")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

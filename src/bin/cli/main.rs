@@ -41,8 +41,21 @@ enum Command {
     },
     Tile {
         word_file: PathBuf,
-        exercise_file: PathBuf,
+        #[arg(long)]
+        exercise_files: Vec<PathBuf>,
+        // Optional parameter for assumed words.
+        #[arg(long)]
+        assumed_file: Option<PathBuf>,
+        #[arg(long, value_enum)]
+        output_format: OutputFormat,
     },
+}
+
+#[derive(clap::ValueEnum, Clone, Default, Debug)]
+enum OutputFormat {
+    #[default]
+    Human,
+    CSV,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -77,57 +90,78 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         Command::Tile {
             word_file,
-            exercise_file,
+            exercise_files,
+            assumed_file,
+            output_format,
         } => {
             let dict = Dictionary::new();
 
-            let contents = std::fs::read_to_string(word_file)?;
-            let entries = dict.segment(&contents);
-
-            let exercises: Vec<Exercise> =
-                serde_yaml::from_str(&std::fs::read_to_string(exercise_file)?)?;
-
-            let mut words = vec![];
-            for entry in entries {
-                if let Either::Left(word) = entry {
-                    words.push(word.simplified().to_string());
-                }
+            let mut exercises: Vec<Exercise> = vec![];
+            for exercise_file in exercise_files {
+                let contents = std::fs::read_to_string(exercise_file)?;
+                exercises.extend(serde_yaml::from_str::<Vec<Exercise>>(&contents)?);
             }
-            let course = Course::new(words.clone());
+
+            let words = load_words(&dict, word_file)?;
+            let assumed_words = if let Some(assumed_file) = assumed_file {
+                load_words(&dict, assumed_file)?
+            } else {
+                vec![]
+            };
+            let course = Course::new(
+                words
+                    .clone()
+                    .into_iter()
+                    .chain(assumed_words.into_iter())
+                    .collect(),
+            );
             for word in words {
-                println!("{}", word);
+                match output_format {
+                    OutputFormat::Human => println!("{}", word),
+                    OutputFormat::CSV => print!("{}\t", word),
+                }
+
                 let mut costs = exercises
                     .iter()
                     .filter(|e| e.words().iter().any(|w| w.as_str() == word))
                     .map(|e| (e, course.exercise_cost(e)))
                     .collect::<Vec<_>>();
                 costs.sort_by(|a, b| a.1.cmp(&b.1));
-                if costs.is_empty() {
-                    anes::execute!(
-                        std::io::stdout(),
-                        SetForegroundColor(Color::Red),
-                        "  No exercises.\n",
-                        ResetAttributes,
-                    )?;
-                } else if costs[0].1.n_novel_words == 0 {
-                    let e = costs[0].0;
-                    execute!(
-                        std::io::stdout(),
-                        SetForegroundColor(Color::Green),
-                        "  Free: ",
-                        ResetAttributes,
-                    )?;
-                    println!("{}", e.english);
-                } else {
-                    execute!(
-                        std::io::stdout(),
-                        SetForegroundColor(Color::Yellow),
-                        "  Costly\n",
-                        ResetAttributes,
-                    )?;
-                    for cost in costs.iter().take(5) {
-                        let e = cost.0;
-                        println!("  {} {:?}", e.english, cost.1);
+                match output_format {
+                    OutputFormat::Human => {
+                        if costs.is_empty() {
+                            anes::execute!(
+                                std::io::stdout(),
+                                SetForegroundColor(Color::Red),
+                                "  No exercises.\n",
+                                ResetAttributes,
+                            )?;
+                        } else if costs[0].1.n_novel_words == 0 {
+                            let e = costs[0].0;
+                            execute!(
+                                std::io::stdout(),
+                                SetForegroundColor(Color::Green),
+                                "  Free: ",
+                                ResetAttributes,
+                            )?;
+                            println!("{}", e.english);
+                        } else {
+                            execute!(
+                                std::io::stdout(),
+                                SetForegroundColor(Color::Yellow),
+                                "  Costly\n",
+                                ResetAttributes,
+                            )?;
+                            for cost in costs.iter().take(5) {
+                                let e = cost.0;
+                                println!("  {} {:?}", e.english, cost.1);
+                            }
+                        }
+                    }
+                    OutputFormat::CSV => {
+                        if let Some(cost) = costs.first() {
+                            println!("{}\t{}", costs[0].0.english, costs[0].0.chinese());
+                        }
                     }
                 }
             }
@@ -137,6 +171,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+fn load_words(dict: &Dictionary, file: PathBuf) -> anyhow::Result<Vec<String>> {
+    let contents = std::fs::read_to_string(file)?;
+    let entries = dict.segment(&contents);
+
+    let mut words = vec![];
+    for entry in entries {
+        if let Either::Left(word) = entry {
+            words.push(word.simplified().to_string());
+        }
+    }
+    Ok(words)
 }
 
 #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]

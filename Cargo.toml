@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anes = "0.2.0"
+anyhow = "1.0.86"
 chrono = "0.4.31"
 clap = { version = "4.4.12", features = ["derive"] }
 crossterm = "0.27.0"
