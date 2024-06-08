@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -106,12 +107,21 @@ impl Segment {
                 chinese = new_chinese;
                 pinyin = str_tail(&pinyin);
             } else {
+                let longest_result = results
+                    .iter()
+                    .map(|e| e.simplified().chars().count())
+                    .max()
+                    .unwrap_or_default();
+                let n_longest = results
+                    .iter()
+                    .filter(|e| e.simplified().chars().count() == longest_result)
+                    .map(|e| e.pinyin())
+                    .unique()
+                    .count();
                 for entry in results.into_iter().rev() {
                     let pretty = prettify_pinyin::prettify(entry.pinyin());
                     let pretty_compact = pretty.to_lowercase().replace(" ", "");
-                    // dbg!(&pretty);
-                    // dbg!(&pinyin);
-                    let stripped = if lax_pinyin {
+                    let stripped = if lax_pinyin && longest_result >= 2 && n_longest == 1 {
                         strip_prefix_no_tones(pinyin, &pretty_compact)
                     } else {
                         pinyin.strip_prefix(pretty_compact.as_str())
