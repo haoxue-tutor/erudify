@@ -52,6 +52,8 @@ enum Command {
         assumed_file: Option<PathBuf>,
         #[arg(long, value_enum)]
         output_format: OutputFormat,
+        #[arg(long)]
+        frequency_sort: bool,
     },
 }
 
@@ -103,6 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             exercise_files,
             assumed_file,
             output_format,
+            frequency_sort,
         } => {
             let dict = Dictionary::new();
 
@@ -112,13 +115,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 exercises.extend(serde_yaml::from_str::<Vec<Exercise>>(&contents)?);
             }
 
-            let words = load_words(&dict, word_file)?;
+            let mut words = load_words(&dict, word_file)?;
+            if frequency_sort {
+                words.sort_by(|a, b| dict.frequency(b).total_cmp(&dict.frequency(a)));
+            }
             let assumed_words = if let Some(assumed_file) = assumed_file {
                 load_words(&dict, assumed_file)?
             } else {
                 vec![]
             };
-            let course = Course::new(
+            let mut course = Course::new(
                 words
                     .clone()
                     .into_iter()
@@ -169,7 +175,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if cost.1.n_novel_words > 0 {
                                 break;
                             }
+                            // print!(
+                            //     "{}/{}/{}\t",
+                            //     cost.1.n_novel_words,
+                            //     cost.1.n_future_words,
+                            //     cost.1.n_extraneous_words
+                            // );
                             println!("{}\t{}\t{}", word, cost.0.english, cost.0.chinese());
+                            course.push_exercise(cost.0.clone());
                         }
                     }
                 }
@@ -186,13 +199,11 @@ fn load_words(dict: &Dictionary, file: PathBuf) -> anyhow::Result<Vec<String>> {
     let contents = std::fs::read_to_string(file)?;
     let entries = dict.segment(&contents);
 
-    let mut words = vec![];
-    for entry in entries {
-        if let Either::Left(word) = entry {
-            words.push(word.simplified().to_string());
-        }
-    }
-    Ok(words)
+    Ok(entries
+        .into_iter()
+        .filter_map(Either::left)
+        .map(|e| e.simplified().to_string())
+        .collect::<Vec<_>>())
 }
 
 #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
@@ -212,7 +223,6 @@ struct ExerciseCost {
 // Each exercise has a set of words. The "cost" of an exercise is the maximum cost of any word in
 // the exercise.
 struct Course {
-    known_exercises: Vec<Exercise>,
     course_exercises: Vec<Exercise>,
     word_list: Vec<String>,
 }
@@ -220,10 +230,13 @@ struct Course {
 impl Course {
     fn new(words: Vec<String>) -> Self {
         Course {
-            known_exercises: vec![],
             course_exercises: vec![],
             word_list: words,
         }
+    }
+
+    fn push_exercise(&mut self, exercise: Exercise) {
+        self.course_exercises.push(exercise);
     }
 
     fn exercise_cost(&self, exercise: &Exercise) -> ExerciseCost {
@@ -254,7 +267,7 @@ impl Course {
             n_novel_words: novel_words,
             n_future_words: future_words,
             n_extraneous_words: extraneous_words,
-            n_total_words: exercise.words().len(),
+            n_total_words: exercise.chinese().chars().count(),
         }
     }
 }
