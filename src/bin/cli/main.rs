@@ -126,11 +126,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .collect(),
             );
             for word in words {
-                match output_format {
-                    OutputFormat::Human => println!("{}", word),
-                    OutputFormat::CSV => print!("{}\t", word),
-                }
-
                 let mut costs = exercises
                     .iter()
                     .filter(|e| e.words().iter().any(|w| w.as_str() == word))
@@ -139,6 +134,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 costs.sort_by(|a, b| a.1.cmp(&b.1));
                 match output_format {
                     OutputFormat::Human => {
+                        println!("{}", word);
                         if costs.is_empty() {
                             anes::execute!(
                                 std::io::stdout(),
@@ -169,8 +165,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                     OutputFormat::CSV => {
-                        if let Some(cost) = costs.first() {
-                            println!("{}\t{}", cost.0.english, cost.0.chinese());
+                        for cost in costs.iter().take(1) {
+                            if cost.1.n_novel_words > 0 {
+                                break;
+                            }
+                            println!("{}\t{}\t{}", word, cost.0.english, cost.0.chinese());
                         }
                     }
                 }
