@@ -1,4 +1,7 @@
-use std::io;
+use std::{
+    fs::File,
+    io::{self, BufReader},
+};
 
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -11,11 +14,14 @@ use ratatui::{
     widgets::{Block, List, ListItem, Paragraph},
 };
 
+use rodio::{Decoder, OutputStream, Sink};
 use tui_input::{backend::crossterm::EventHandler, Input};
 
 use crate::convert::Exercise;
 
 struct App {
+    _audio_stream: OutputStream,
+    audio_sink: Sink,
     exercises: Vec<Exercise>,
     exercise: Exercise,
     index: usize,
@@ -28,7 +34,10 @@ struct App {
 impl App {
     fn new(mut exercises: Vec<Exercise>) -> Self {
         let exercise = exercises.pop().unwrap();
+        let (stream, stream_handle) = OutputStream::try_default().unwrap();
         App {
+            _audio_stream: stream,
+            audio_sink: Sink::try_new(&stream_handle).unwrap(),
             exercises,
             exercise,
             index: 0,
@@ -95,7 +104,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
 
         while app.index < app.exercise.segments.len() {
             let target = &app.exercise.segments[app.index].pinyin;
-            if target == &app.input.value().trim().to_lowercase() {
+            if target.to_lowercase() == app.input.value().trim().to_lowercase() {
                 app.index += 1;
                 app.input = Input::new("".into());
                 app.show_hint = false;
@@ -104,6 +113,19 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
             }
         }
         if app.index >= app.exercise.segments.len() {
+            {
+                let clean_name = app
+                    .exercise
+                    .chinese()
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>();
+                // dbg!(&clean_name);
+                let file = BufReader::new(File::open(format!("audio/{}.mp3", clean_name)).unwrap());
+                // Decode that sound file into a source
+                let source = Decoder::new(file).unwrap();
+                app.audio_sink.append(source);
+            }
             app.history.push(app.exercise.clone());
             let exercise = app.exercises.pop().unwrap();
             app.exercise = exercise;

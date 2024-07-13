@@ -4,17 +4,26 @@
 // _ -> Model // Initial model
 // [Response] -> Model
 
-use std::path::PathBuf;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
 use anes::*;
+use bytes::buf::Reader;
+use bytes::{Buf, Bytes};
 use clap::{Parser, Subcommand};
 use itertools::Either;
+use openai_dive::v1::api::Client;
+use openai_dive::v1::models::TTSEngine;
+use openai_dive::v1::resources::audio::{
+    AudioSpeechParameters, AudioSpeechResponseFormat, AudioVoice,
+};
 use ordered_float::OrderedFloat;
+use rodio::{Decoder, OutputStream, Sink, Source};
 
 use std::error::Error;
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 
 use haoxue_dict::Dictionary;
 
@@ -43,6 +52,9 @@ enum Command {
     Train {
         exercise_file: PathBuf,
     },
+    Audio {
+        exercise_file: PathBuf,
+    },
     Tile {
         word_file: PathBuf,
         #[arg(long)]
@@ -62,9 +74,11 @@ enum OutputFormat {
     #[default]
     Human,
     CSV,
+    YAML,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -99,6 +113,30 @@ fn main() -> Result<(), Box<dyn Error>> {
             let exercises: Vec<Exercise> = serde_yaml::from_str(&contents)?;
 
             train(exercises)?;
+        }
+        Command::Audio { exercise_file } => {
+            let mut file = File::open(exercise_file)?;
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)?;
+
+            let exercises: Vec<Exercise> = serde_yaml::from_str(&contents)?;
+
+            let api_key = std::env::var("OPENAI_API_KEY").expect("$OPENAI_API_KEY is not set");
+            let client = Client::new(api_key);
+
+            let (_stream, stream_handle) = OutputStream::try_default().unwrap();
+            let sink = Sink::try_new(&stream_handle).unwrap();
+
+            for exercise in exercises {
+                validate_audio(
+                    &client,
+                    &sink,
+                    &exercise.chinese(),
+                    Some(&exercise.pinyin()),
+                )
+                .await;
+                validate_audio(&client, &sink, &exercise.english, None).await;
+            }
         }
         Command::Tile {
             word_file,
@@ -175,13 +213,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if cost.1.n_novel_words > 0 {
                                 break;
                             }
-                            // print!(
-                            //     "{}/{}/{}\t",
-                            //     cost.1.n_novel_words,
-                            //     cost.1.n_future_words,
-                            //     cost.1.n_extraneous_words
-                            // );
+                            print!(
+                                "{}/{}/{}\t",
+                                cost.1.n_novel_words,
+                                cost.1.n_future_words,
+                                cost.1.n_extraneous_words
+                            );
                             println!("{}\t{}\t{}", word, cost.0.english, cost.0.chinese());
+                            course.push_exercise(cost.0.clone());
+                        }
+                    }
+                    OutputFormat::YAML => {
+                        for cost in costs.iter().take(1) {
+                            if cost.1.n_novel_words > 0 {
+                                break;
+                            }
+                            println!("{}", serde_yaml::to_string(&[cost.0]).unwrap());
                             course.push_exercise(cost.0.clone());
                         }
                     }
@@ -193,6 +240,52 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+async fn validate_audio(client: &Client, sink: &Sink, text: &str, hint: Option<&str>) {
+    let audio_file = audio_file_name(text);
+    while !audio_file.exists() {
+        println!("Text: {}", text);
+        if let Some(hint) = hint {
+            println!("Hint: {}", hint);
+        }
+        let parameters = AudioSpeechParameters {
+            model: TTSEngine::Tts1.to_string(),
+            input: text.to_string(),
+            voice: AudioVoice::Nova,
+            response_format: Some(AudioSpeechResponseFormat::Mp3),
+            speed: Some(1.0),
+        };
+
+        let response = client.audio().create_speech(parameters).await.unwrap();
+
+        // response.save(audio_file).await.unwrap();
+        {
+            let file = BufReader::new(std::io::Cursor::new(response.bytes.to_vec()));
+            // Decode that sound file into a source
+            let source = Decoder::new(file).unwrap();
+            // Play the sound directly on the device
+            sink.append(source);
+        }
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+        if input == "y\n" {
+            // sink.stop();
+            // sink.clear();
+            std::fs::write(&audio_file, response.bytes).unwrap();
+        }
+    }
+}
+
+fn audio_file_name(text: &str) -> PathBuf {
+    PathBuf::from(format!(
+        "audio/{}.mp3",
+        text.chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .collect::<String>()
+            .to_lowercase()
+            .replace(" ", "_")
+    ))
 }
 
 fn load_words(dict: &Dictionary, file: PathBuf) -> anyhow::Result<Vec<String>> {

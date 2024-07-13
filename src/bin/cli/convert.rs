@@ -53,6 +53,13 @@ impl Exercise {
             .collect::<Vec<_>>()
             .join("")
     }
+    pub fn pinyin(&self) -> String {
+        self.segments
+            .iter()
+            .map(|s| s.pinyin.clone())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,14 +125,15 @@ impl Segment {
                     .map(|e| e.pinyin())
                     .unique()
                     .count();
-                for entry in results.into_iter().rev() {
+                for (nth, entry) in results.iter().rev().enumerate() {
                     let pretty = prettify_pinyin::prettify(entry.pinyin());
                     let pretty_compact = pretty.to_lowercase().replace(" ", "");
-                    let stripped = if lax_pinyin && longest_result >= 2 && n_longest == 1 {
-                        strip_prefix_no_tones(pinyin, &pretty_compact)
-                    } else {
-                        pinyin.strip_prefix(pretty_compact.as_str())
-                    };
+                    let stripped =
+                        if lax_pinyin && longest_result >= 2 && n_longest == 1 && nth == 0 {
+                            strip_prefix_no_tones(pinyin, &pretty_compact)
+                        } else {
+                            pinyin.strip_prefix(pretty_compact.as_str())
+                        };
                     if let Some(new_pinyin) = stripped {
                         if strict_segmentation && new_pinyin.chars().next().unwrap().is_alphabetic()
                         {
