@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct Exercise {
     pub segments: Vec<Segment>,
     pub english: String,
@@ -62,7 +62,7 @@ impl Exercise {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Segment {
     pub chinese: String,
     pub pinyin: String,
@@ -268,7 +268,7 @@ mod tests {
     fn basic_segment_3() {
         dbg!(Segment::join(
             "他答应帮忙，但是忘记了。",
-            "Tā dāyìng bāngmáng, dànshì wàngjì le."
+            "Tā dāying bāngmáng, dànshì wàngjì le."
         ));
     }
 

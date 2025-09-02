@@ -4,12 +4,10 @@
 // _ -> Model // Initial model
 // [Response] -> Model
 
-use std::ops::Deref;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anes::*;
-use bytes::buf::Reader;
-use bytes::{Buf, Bytes};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use itertools::Either;
 use openai_dive::v1::api::Client;
@@ -33,6 +31,8 @@ use convert::Exercise;
 mod train;
 use train::train;
 
+mod model;
+
 #[derive(Parser, Clone)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -50,7 +50,10 @@ enum Command {
         strict_pinyin: bool,
     },
     Train {
+        word_file: PathBuf,
         exercise_file: PathBuf,
+        #[arg(long)]
+        frequency_sort: bool,
     },
     Audio {
         exercise_file: PathBuf,
@@ -100,11 +103,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-        Command::Train { exercise_file } => {
+        Command::Train {
+            word_file,
+            exercise_file,
+            frequency_sort,
+        } => {
             // Chinese: 我是学生。
             // Pinyin:  wǒ shì xuéshēng.
             // English: I am a student.
             // Answer:  wǒ
+
+            let dict = Dictionary::new();
+            let mut words = load_words(&dict, word_file)?;
+            if frequency_sort {
+                words.sort_by(|a, b| dict.frequency(b).total_cmp(&dict.frequency(a)));
+            }
 
             let mut file = File::open(exercise_file)?;
             let mut contents = String::new();
@@ -112,7 +125,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let exercises: Vec<Exercise> = serde_yaml::from_str(&contents)?;
 
-            train(exercises)?;
+            train(words, exercises)?;
         }
         Command::Audio { exercise_file } => {
             let mut file = File::open(exercise_file)?;
@@ -162,75 +175,76 @@ async fn main() -> Result<(), Box<dyn Error>> {
             } else {
                 vec![]
             };
-            let mut course = Course::new(
-                words
-                    .clone()
-                    .into_iter()
-                    .chain(assumed_words.into_iter())
-                    .collect(),
-            );
-            for word in words {
-                let mut costs = exercises
-                    .iter()
-                    .filter(|e| e.words().iter().any(|w| w.as_str() == word))
-                    .map(|e| (e, course.exercise_cost(e)))
-                    .collect::<Vec<_>>();
-                costs.sort_by(|a, b| a.1.cmp(&b.1));
+            let mut model = model::UserModel::new();
+            let now = Utc::now();
+            for word in assumed_words {
+                let prof = model.with_proficiency(&word, now);
+                prof.success(now);
+            }
+            loop {
+                let word = model.next_word(now, &words);
+                if model.seen(&word) {
+                    break;
+                }
+                model.with_proficiency(&word, now).success(now);
+
+                let mut alt_model = model.clone();
+                for _ in 0..5 {
+                    let word = alt_model.next_word(now, &words);
+                    println!("{}", word);
+                    alt_model.with_proficiency(&word, now).success(now);
+                }
+                let exercise = alt_model
+                    .next_exercise(now, &exercises, &words, &word)
+                    .unwrap();
+                let score = alt_model.score_exercise(now, &exercise, &words);
+                model.mark_seen(&exercise, now);
+                for word in exercise.words() {
+                    model.with_proficiency(&word, now).success(now);
+                }
                 match output_format {
                     OutputFormat::Human => {
                         println!("{}", word);
-                        if costs.is_empty() {
-                            anes::execute!(
-                                std::io::stdout(),
-                                SetForegroundColor(Color::Red),
-                                "  No exercises.\n",
-                                ResetAttributes,
-                            )?;
-                        } else if costs[0].1.n_novel_words == 0 {
-                            let e = costs[0].0;
-                            execute!(
-                                std::io::stdout(),
-                                SetForegroundColor(Color::Green),
-                                "  Free: ",
-                                ResetAttributes,
-                            )?;
-                            println!("{}", e.english);
-                        } else {
-                            execute!(
-                                std::io::stdout(),
-                                SetForegroundColor(Color::Yellow),
-                                "  Costly\n",
-                                ResetAttributes,
-                            )?;
-                            for cost in costs.iter().take(5) {
-                                let e = cost.0;
-                                println!("  {} {:?}", e.english, cost.1);
-                            }
-                        }
+                        // if costs.is_empty() {
+                        //     anes::execute!(
+                        //         std::io::stdout(),
+                        //         SetForegroundColor(Color::Red),
+                        //         "  No exercises.\n",
+                        //         ResetAttributes,
+                        //     )?;
+                        // } else if costs[0].1.n_novel_words == 0 {
+                        //     let e = costs[0].0;
+                        //     execute!(
+                        //         std::io::stdout(),
+                        //         SetForegroundColor(Color::Green),
+                        //         "  Free: ",
+                        //         ResetAttributes,
+                        //     )?;
+                        //     println!("{}", e.english);
+                        // } else {
+                        //     execute!(
+                        //         std::io::stdout(),
+                        //         SetForegroundColor(Color::Yellow),
+                        //         "  Costly\n",
+                        //         ResetAttributes,
+                        //     )?;
+                        //     for cost in costs.iter().take(5) {
+                        //         let e = cost.0;
+                        //         println!("  {} {:?}", e.english, cost.1);
+                        //     }
+                        // }
                     }
                     OutputFormat::CSV => {
-                        for cost in costs.iter().take(1) {
-                            if cost.1.n_novel_words > 0 {
-                                break;
-                            }
-                            print!(
-                                "{}/{}/{}\t",
-                                cost.1.n_novel_words,
-                                cost.1.n_future_words,
-                                cost.1.n_extraneous_words
-                            );
-                            println!("{}\t{}\t{}", word, cost.0.english, cost.0.chinese());
-                            course.push_exercise(cost.0.clone());
-                        }
+                        print!(
+                            "{}/{}/{}\t",
+                            score.words_not_in_list, score.words_in_list, score.words_not_seen
+                        );
+                        println!("{}\t{}\t{}", word, exercise.english, exercise.chinese());
+                        // course.push_exercise(exercise.clone());
                     }
                     OutputFormat::YAML => {
-                        for cost in costs.iter().take(1) {
-                            if cost.1.n_novel_words > 0 {
-                                break;
-                            }
-                            println!("{}", serde_yaml::to_string(&[cost.0]).unwrap());
-                            course.push_exercise(cost.0.clone());
-                        }
+                        println!("{}", serde_yaml::to_string(&[exercise]).unwrap());
+                        // course.push_exercise(exercise);
                     }
                 }
             }
@@ -332,12 +346,14 @@ impl Course {
         self.course_exercises.push(exercise);
     }
 
-    fn exercise_cost(&self, exercise: &Exercise) -> ExerciseCost {
-        let seen_words = self
+    fn exercise_cost(&self, target_word: &str, exercise: &Exercise) -> ExerciseCost {
+        let mut seen_words = self
             .course_exercises
             .iter()
             .flat_map(|e| e.words())
             .collect::<Vec<_>>();
+        let target_word = target_word.to_string();
+        seen_words.push(&target_word);
 
         let exercise_words = exercise.words();
         let novel_words = exercise_words

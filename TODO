@@ -33,6 +33,25 @@ Notes:
  - Extend with stories (audio): Linear progression thorugh textstories with
    Audio prompts and Chinese answers. Reveal story gradually.
 
+Hmm, we can do away with having a tiled course. A list of words is enough. We
+can pick exercises on the fly. This should be fast enough. We can show a status:
+number of words seen, total number of words in list, number of words to be
+reviewed. Once all words have been seen and reviewed, we can overtrain on words
+with the nearest repeat date.
+
+Key components:
+- (UserModel, WordList) -> Word
+  - Pick word with the nearest repeat date in the past.
+  - If no such word, pick the next word in the word list.
+- (UserModel, Set Exercise, Word) -> Exercise
+  - Cost model:
+    - Known words are free.
+    - Novel words: Number of new words _not_ in course
+    - Future words: Number of new words in course.
+    - Seen date: Last seen date of the exercise.
+- (UserModel, Exercise, Response) -> UserModel
+- Exercise -> UI
+
 Commands:
   - Sort word list by frequency.
   - Take word list. For each unique word, find best exercise. Keep track of which words has already been
