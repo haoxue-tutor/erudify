@@ -198,7 +198,16 @@ fn ui(f: &mut Frame, app: &App) {
     let [status_area, exercise_score_area, help_area, pinyin_area, hint_area, messages_area] =
         vertical.areas(f.size());
 
-    let status = Paragraph::new(format!("Target word: {}", app.target_word));
+    let model_status = app.model.status(&app.exercises, &app.word_list, Utc::now());
+    let status = Paragraph::new(format!(
+        "Target word: {}, known words: {}, to review: {}, total: {}, sentences: {}/{}",
+        app.target_word,
+        model_status.known_words,
+        model_status.words_to_review,
+        model_status.total_words,
+        model_status.seen_sentences,
+        model_status.unlocked_sentences
+    ));
     f.render_widget(status, status_area);
 
     let exercise_score = Paragraph::new(format!("Exercise score: {:?}", app.exercise_score));

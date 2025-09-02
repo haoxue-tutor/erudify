@@ -200,7 +200,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 model.with_proficiency(&word, now).success(now);
 
                 let mut alt_model = model.clone();
-                for _ in 0..5 {
+                for _ in 0..0 {
                     let word = alt_model.next_word(now, &words);
                     println!("{}", word);
                     alt_model.with_proficiency(&word, now).success(now);

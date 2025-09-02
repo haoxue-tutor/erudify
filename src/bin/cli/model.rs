@@ -45,6 +45,19 @@ pub struct ExerciseScore {
     pub future_words_count: usize,
 }
 
+pub struct WordListStatus {
+    // Number of unique words in the word list
+    pub total_words: usize,
+    // Number of words with a repetition scheduled in the future
+    pub known_words: usize,
+    // Number of words with a repetition scheduled in the past
+    pub words_to_review: usize,
+    // Number of unique exercises that contain at least one word from the word list _and_ has been seen by the user.
+    pub seen_sentences: usize,
+    // Number of unique exercises that contain at least one word from the word list _and_ contains no unseen words.
+    pub unlocked_sentences: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct UserModel {
     seen_words: HashMap<String, Proficiency>,
@@ -125,6 +138,51 @@ impl UserModel {
         fs::create_dir_all(data_dir)?;
 
         Ok(data_dir.to_path_buf())
+    }
+
+    pub fn status(
+        &self,
+        exercises: &[Exercise],
+        word_list: &[String],
+        at: DateTime<Utc>,
+    ) -> WordListStatus {
+        let total_words = word_list.len();
+        let known_words = self
+            .seen_words
+            .iter()
+            .filter(|(word, prof)| word_list.contains(word) && prof.target_date > at)
+            .count();
+        let words_to_review = self
+            .seen_words
+            .iter()
+            .filter(|(word, prof)| word_list.contains(word) && prof.target_date <= at)
+            .count();
+
+        let mut seen_sentences_set = HashSet::new();
+        let mut unlocked_sentences_set = HashSet::new();
+
+        for exercise in exercises {
+            let exercise_words = exercise.words();
+            if exercise_words.iter().any(|word| word_list.contains(word)) {
+                if exercise_words
+                    .iter()
+                    .all(|word| self.seen_words.contains_key(word.as_str()))
+                {
+                    if self.seen_exercises.contains_key(exercise) {
+                        seen_sentences_set.insert(exercise.clone());
+                    }
+                    unlocked_sentences_set.insert(exercise.clone());
+                }
+            }
+        }
+
+        WordListStatus {
+            total_words,
+            known_words,
+            words_to_review,
+            seen_sentences: seen_sentences_set.len(),
+            unlocked_sentences: unlocked_sentences_set.len(),
+        }
     }
 
     pub fn mark_seen(&mut self, exercise: &Exercise, at: DateTime<Utc>) {
