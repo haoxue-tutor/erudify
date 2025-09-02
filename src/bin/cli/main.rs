@@ -49,6 +49,9 @@ enum Command {
         #[arg(long)]
         strict_pinyin: bool,
     },
+    Sort {
+        word_file: PathBuf,
+    },
     Train {
         word_file: PathBuf,
         exercise_file: PathBuf,
@@ -101,6 +104,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 } else {
                     panic!("Failed to parse at:\n{}", rest.trim());
                 }
+            }
+        }
+        Command::Sort { word_file } => {
+            let dict = Dictionary::new();
+            let mut words = load_words(&dict, word_file)?;
+            words.sort_by(|a, b| dict.frequency(b).total_cmp(&dict.frequency(a)));
+            for word in words {
+                println!("{}", word);
             }
         }
         Command::Train {
